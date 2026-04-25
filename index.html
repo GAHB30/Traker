@@ -259,6 +259,7 @@
   <div class="header-top">
     <div class="logo cg" id="headerLogo">G·TRACKER</div>
     <div class="header-right">
+      <button class="switch-btn" onclick="showDailySummary()" style="background:none;border:none;font-size:18px;padding:0 6px">📊</button>
       <div class="date-badge" id="todayDate"></div>
       <button class="switch-btn" onclick="goToProfiles()">↩ Perfil</button>
     </div>
@@ -288,6 +289,16 @@
     </div>
     <div class="section-title">REFEIÇÕES</div>
     <div id="mealList"><div class="empty-state"><div class="icon">🍽️</div><p>Ainda sem refeições hoje.<br>Toca no + para adicionar!</p></div></div>
+
+    <div id="weeklyStatsWrap" style="display:none;background:var(--surface);border-radius:20px;padding:20px;margin-top:20px;border:1px solid var(--border)">
+      <div class="section-title" style="margin-top:0;margin-bottom:12px">ÚLTIMOS 7 DIAS</div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <div class="macro-pill"><div class="val" id="avgKcal">0</div><div class="lbl">Média kcal</div></div>
+        <div class="macro-pill"><div class="val" id="avgProtein">0g</div><div class="lbl">Média prot</div></div>
+        <div class="macro-pill"><div class="val" id="netBalance">0</div><div class="lbl">Balanço net</div></div>
+      </div>
+      <canvas id="weeklyChart" width="380" height="180" style="width:100%;height:auto"></canvas>
+    </div>
   </div>
 
   <div class="page" id="page-weight">
@@ -295,11 +306,28 @@
       <div class="weight-big cg" id="currentWeight">--<span class="weight-unit">kg</span></div>
       <div class="weight-goal">Objetivo: <span id="weightGoalLbl">70</span>kg · Faltam <span id="weightToGo">--</span> kg</div>
     </div>
+    <div id="weightChartWrap" style="display:none;background:var(--surface);border-radius:20px;padding:20px;margin-bottom:16px;border:1px solid var(--border)">
+      <div class="section-title" style="margin-top:0;margin-bottom:12px">EVOLUÇÃO</div>
+      <canvas id="weightChart" width="380" height="200" style="width:100%;height:auto"></canvas>
+    </div>
     <div class="section-title">HISTÓRICO</div>
     <div id="weightList"><div class="empty-state"><div class="icon">📉</div><p>Adiciona o teu peso com o +</p></div></div>
   </div>
 
   <div class="page" id="page-training">
+    <div id="trainingCalendarWrap" style="display:none;background:var(--surface);border-radius:20px;padding:20px;margin-bottom:16px;border:1px solid var(--border)">
+      <div class="section-title" style="margin-top:0;margin-bottom:12px" id="calendarTitle">CALENDÁRIO</div>
+      <div id="trainingCalendar"></div>
+    </div>
+
+    <div id="prsWrap" style="background:var(--surface);border-radius:20px;padding:20px;margin-bottom:16px;border:1px solid var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div class="section-title" style="margin:0">PRs · RECORDES</div>
+        <button onclick="openPRModal()" id="addPRBtn" style="background:var(--accent2);border:none;border-radius:20px;padding:6px 14px;color:var(--bg);cursor:pointer;font-family:'DM Sans';font-size:12px;font-weight:700">+ PR</button>
+      </div>
+      <div id="prsList"><div style="text-align:center;color:var(--muted);font-size:13px;padding:12px">Sem PRs registados.</div></div>
+    </div>
+
     <div class="section-title">TREINOS</div>
     <div id="trainingList"><div class="empty-state"><div class="icon">🏋️</div><p>Regista o teu treino com o +</p></div></div>
   </div>
@@ -311,6 +339,16 @@
 <div class="modal-overlay" id="foodModal">
   <div class="modal">
     <div class="modal-title cg" id="foodModalTitle">ADICIONAR REFEIÇÃO</div>
+
+    <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
+      <button onclick="openFavorites()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px;color:var(--text);cursor:pointer;font-family:'DM Sans';font-size:13px">⭐ Favoritos</button>
+      <button onclick="copyYesterday()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px;color:var(--text);cursor:pointer;font-family:'DM Sans';font-size:13px">📋 Copiar Ontem</button>
+    </div>
+
+    <div id="favoritesPanel" style="display:none;background:var(--surface2);border-radius:12px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px">Toca para usar</div>
+      <div id="favoritesList"></div>
+    </div>
     <div class="input-group">
       <label>Tipo de Refeição</label>
       <select id="mealType">
@@ -336,7 +374,8 @@
     <div class="input-group"><label>Gordura (g)</label><input type="number" id="mealFat" placeholder="ex: 5"></div>
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal('foodModal')">Cancelar</button>
-      <button class="btn btn-primary cg" id="foodAddBtn" onclick="addMeal()">Adicionar</button>
+      <button class="btn btn-primary cg" id="foodAddBtn" onclick="addMeal(false)">Adicionar</button>
+      <button class="btn btn-primary cg" id="foodAddFavBtn" onclick="addMeal(true)" style="flex:0 0 auto;padding:14px 16px">⭐+</button>
     </div>
   </div>
 </div>
@@ -382,6 +421,18 @@
     <div class="ai-result cg" id="aiTrainingResult"></div>
     <div class="input-group"><label>Resultado / Pontuação</label><input type="text" id="trainingResult" placeholder="ex: 5 rounds + 12 reps"></div>
     <div class="input-group"><label>Kcal queimadas</label><input type="number" id="trainingKcal" placeholder="calculado automaticamente"></div>
+    <div class="input-group">
+      <label>Como te sentiste?</label>
+      <select id="trainingFeeling">
+        <option value="">—</option>
+        <option value="🔥">🔥 Forte / PR</option>
+        <option value="💪">💪 Bom</option>
+        <option value="😐">😐 Médio</option>
+        <option value="😩">😩 Difícil</option>
+        <option value="🤕">🤕 Mal-disposto</option>
+      </select>
+    </div>
+    <div class="input-group"><label>Notas — opcional</label><input type="text" id="trainingNotes" placeholder="ex: ombro a doer, costas pesadas"></div>
     <div class="btn-row">
       <button class="btn btn-secondary" onclick="closeModal('trainingModal')">Cancelar</button>
       <button class="btn btn-primary cg" id="trainingAddBtn" onclick="addTraining()">Registar</button>
@@ -389,10 +440,45 @@
   </div>
 </div>
 
+<!-- DAILY SUMMARY MODAL -->
+<div class="modal-overlay" id="summaryModal">
+  <div class="modal">
+    <div class="modal-title cg" id="summaryTitle">RESUMO DO DIA</div>
+    <div id="summaryContent"></div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('summaryModal')">Fechar</button>
+      <button class="btn btn-primary cg" id="exportBtn" onclick="exportSummary()">📋 Copiar</button>
+    </div>
+  </div>
+</div>
+
+<!-- PR MODAL -->
+<div class="modal-overlay" id="prModal">
+  <div class="modal">
+    <div class="modal-title cg" id="prModalTitle">REGISTAR PR</div>
+    <div class="input-group">
+      <label>Exercício</label>
+      <input type="text" id="prExercise" placeholder="ex: Push Press, Deadlift, Snatch">
+    </div>
+    <div class="input-group">
+      <label>Peso (kg) ou tempo / reps</label>
+      <input type="text" id="prValue" placeholder="ex: 100kg ou 3:42">
+    </div>
+    <div class="input-group">
+      <label>Data</label>
+      <input type="date" id="prDate">
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-secondary" onclick="closeModal('prModal')">Cancelar</button>
+      <button class="btn btn-primary cg" id="prAddBtn" onclick="addPR()">Registar</button>
+    </div>
+  </div>
+</div>
+
 </div>
 
 <script>
-const GEMINI_KEY = 'AIzaSyCkmac1fys5zQG3Z2tR-4ZyNAo_zxsgRxw';
+const PROXY_URL = 'https://reliable-parfait-dd2049.netlify.app/api/macros';
 
 const PROFILES = {
   g: { name: 'Gustavo', kcalGoal: 1700, weightGoal: 70, weight: 89 },
@@ -402,10 +488,20 @@ const PROFILES = {
 let cp = null; // current profile
 let currentPage = 'food';
 
-let state = { g: { meals:[], weights:[], trainings:[] }, s: { meals:[], weights:[], trainings:[] } };
+let state = { g: { meals:[], weights:[], trainings:[], favorites:[], prs:{} }, s: { meals:[], weights:[], trainings:[], favorites:[], prs:{} } };
 
 function save() { localStorage.setItem('gs_tracker_v3', JSON.stringify(state)); }
-function load() { const d = localStorage.getItem('gs_tracker_v3'); if (d) try { state = JSON.parse(d); } catch(e){} }
+function load() {
+  const d = localStorage.getItem('gs_tracker_v3');
+  if (d) try {
+    state = JSON.parse(d);
+    // Migration for older versions
+    ['g','s'].forEach(p => {
+      if (!state[p].favorites) state[p].favorites = [];
+      if (!state[p].prs) state[p].prs = {};
+    });
+  } catch(e){}
+}
 
 function today() { return new Date().toISOString().split('T')[0]; }
 function formatDate(d) { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
@@ -442,7 +538,7 @@ function applyTheme() {
     if (id === `tab-${currentPage}`) el.classList.add('active');
   });
 
-  ['foodModalTitle','weightModalTitle','trainingModalTitle'].forEach(id => {
+  ['foodModalTitle','weightModalTitle','trainingModalTitle','prModalTitle','summaryTitle'].forEach(id => {
     document.getElementById(id).className = `modal-title ${c}`;
   });
 
@@ -458,9 +554,12 @@ function applyTheme() {
     document.getElementById(id).className = `ai-loading ${c}`;
   });
 
-  ['foodAddBtn','weightAddBtn','trainingAddBtn'].forEach(id => {
+  ['foodAddBtn','foodAddFavBtn','weightAddBtn','trainingAddBtn','prAddBtn','exportBtn'].forEach(id => {
     document.getElementById(id).className = `btn btn-primary ${c}`;
   });
+  // Restore special inline styling for fav button
+  document.getElementById('foodAddFavBtn').style.flex = '0 0 auto';
+  document.getElementById('foodAddFavBtn').style.padding = '14px 16px';
 
   document.getElementById('weightGoalLbl').textContent = PROFILES[cp].weightGoal;
 
@@ -501,14 +600,15 @@ function closeModal(id) { document.getElementById(id).classList.remove('open'); 
 const typeLabels = { pre:'Pré-treino', breakfast:'Pequeno-almoço', lunch:'Almoço', snack:'Lanche', dinner:'Jantar' };
 const typeEmojis = { pre:'⚡', breakfast:'☀️', lunch:'🥗', snack:'🍎', dinner:'🌙' };
 
-async function geminiCall(prompt) {
-  const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent?key=${GEMINI_KEY}`, {
+async function aiCall(prompt) {
+  const r = await fetch(PROXY_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+    body: JSON.stringify({ prompt })
   });
   const d = await r.json();
-  return d.candidates[0].content.parts[0].text;
+  if (!r.ok) throw new Error(d.error || 'API error');
+  return d.text;
 }
 
 async function calcMacros() {
@@ -520,7 +620,7 @@ async function calcMacros() {
   btn.disabled = true; btn.textContent = '...';
   loading.style.display = 'block'; result.style.display = 'none';
   try {
-    const text = await geminiCall(`És um nutricionista. Calcula os macros para: "${name}". Responde APENAS com JSON válido, sem texto extra, sem markdown: {"kcal": number, "protein": number, "carbs": number, "fat": number, "note": "string curta em português"}`);
+    const text = await aiCall(`És um nutricionista. Calcula os macros para: "${name}". Responde APENAS com JSON válido, sem texto extra, sem markdown: {"kcal": number, "protein": number, "carbs": number, "fat": number, "note": "string curta em português"}`);
     const macros = JSON.parse(text.replace(/```json|```/g, '').trim());
     document.getElementById('mealKcal').value = macros.kcal;
     document.getElementById('mealProtein').value = macros.protein;
@@ -546,7 +646,7 @@ async function calcTrainingKcal() {
   btn.disabled = true; btn.textContent = '...';
   loading.style.display = 'block'; result.style.display = 'none';
   try {
-    const text = await geminiCall(`És um personal trainer. Estima as calorias queimadas: tipo="${type}", descrição="${desc || type}", duração=${duration} minutos, peso=${weight}kg. Responde APENAS com JSON válido: {"kcal": number, "note": "string curta em português"}`);
+    const text = await aiCall(`És um personal trainer. Estima as calorias queimadas: tipo="${type}", descrição="${desc || type}", duração=${duration} minutos, peso=${weight}kg. Responde APENAS com JSON válido: {"kcal": number, "note": "string curta em português"}`);
     const data = JSON.parse(text.replace(/```json|```/g, '').trim());
     document.getElementById('trainingKcal').value = data.kcal;
     result.style.display = 'block';
@@ -558,18 +658,85 @@ async function calcTrainingKcal() {
   loading.style.display = 'none'; btn.disabled = false; btn.textContent = '✦ IA';
 }
 
-function addMeal() {
+function addMeal(saveAsFavorite) {
   const name = document.getElementById('mealName').value.trim();
   const kcal = parseInt(document.getElementById('mealKcal').value) || 0;
   if (!name || !kcal) return alert('Preenche o nome e as calorias!');
-  state[cp].meals.push({
+  const meal = {
     id: Date.now(), date: today(),
     type: document.getElementById('mealType').value, name, kcal,
     protein: parseInt(document.getElementById('mealProtein').value) || 0,
     carbs: parseInt(document.getElementById('mealCarbs').value) || 0,
     fat: parseInt(document.getElementById('mealFat').value) || 0
-  });
+  };
+  state[cp].meals.push(meal);
+
+  if (saveAsFavorite) {
+    const exists = state[cp].favorites.find(f => f.name === meal.name);
+    if (!exists) {
+      state[cp].favorites.push({ id: Date.now() + 1, name: meal.name, kcal: meal.kcal, protein: meal.protein, carbs: meal.carbs, fat: meal.fat });
+    }
+  }
+
   ['mealName','mealKcal','mealProtein','mealCarbs','mealFat'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('favoritesPanel').style.display = 'none';
+  save(); closeModal('foodModal'); renderFood();
+}
+
+function openFavorites() {
+  const panel = document.getElementById('favoritesPanel');
+  const list = document.getElementById('favoritesList');
+  if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+  panel.style.display = 'block';
+  const favs = state[cp].favorites;
+  if (favs.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:var(--muted);font-size:13px;padding:8px">Sem favoritos. Usa o botão ⭐+ ao adicionar para guardar.</div>';
+    return;
+  }
+  const c = cp === 'g' ? 'cg' : 'cs';
+  list.innerHTML = favs.map(f => `
+    <div onclick="useFavorite(${f.id})" style="background:var(--surface);border-radius:10px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+      <div style="flex:1">
+        <div style="font-size:14px">${f.name}</div>
+        <div style="font-size:11px;color:var(--muted);margin-top:2px">${f.protein}g prot · ${f.carbs}g hidr · ${f.fat}g gord</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <div class="meal-kcal ${c}" style="font-size:18px">${f.kcal}</div>
+        <button onclick="event.stopPropagation();deleteFavorite(${f.id})" class="meal-delete">×</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function useFavorite(id) {
+  const f = state[cp].favorites.find(f => f.id === id);
+  if (!f) return;
+  document.getElementById('mealName').value = f.name;
+  document.getElementById('mealKcal').value = f.kcal;
+  document.getElementById('mealProtein').value = f.protein;
+  document.getElementById('mealCarbs').value = f.carbs;
+  document.getElementById('mealFat').value = f.fat;
+  document.getElementById('favoritesPanel').style.display = 'none';
+}
+
+function deleteFavorite(id) {
+  if (!confirm('Remover este favorito?')) return;
+  state[cp].favorites = state[cp].favorites.filter(f => f.id !== id);
+  save();
+  openFavorites();
+  openFavorites(); // re-open to refresh
+}
+
+function copyYesterday() {
+  const yest = new Date();
+  yest.setDate(yest.getDate() - 1);
+  const yestStr = yest.toISOString().split('T')[0];
+  const yestMeals = state[cp].meals.filter(m => m.date === yestStr);
+  if (yestMeals.length === 0) return alert('Não há refeições registadas ontem!');
+  if (!confirm(`Copiar ${yestMeals.length} refeições de ontem para hoje?`)) return;
+  yestMeals.forEach(m => {
+    state[cp].meals.push({ ...m, id: Date.now() + Math.random(), date: today() });
+  });
   save(); closeModal('foodModal'); renderFood();
 }
 
@@ -593,13 +760,215 @@ function addTraining() {
     id: Date.now(), date: today(),
     type: document.getElementById('trainingType').value, desc,
     result: document.getElementById('trainingResult').value.trim(),
-    kcal: parseInt(document.getElementById('trainingKcal').value) || 0
+    kcal: parseInt(document.getElementById('trainingKcal').value) || 0,
+    feeling: document.getElementById('trainingFeeling').value || '',
+    notes: document.getElementById('trainingNotes').value.trim() || ''
   });
-  ['trainingDesc','trainingResult','trainingKcal','trainingDuration'].forEach(id => document.getElementById(id).value = '');
+  ['trainingDesc','trainingResult','trainingKcal','trainingDuration','trainingNotes'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('trainingFeeling').value = '';
   save(); closeModal('trainingModal'); renderTraining();
 }
 
+function openPRModal() {
+  document.getElementById('prDate').value = today();
+  document.getElementById('prModal').classList.add('open');
+}
+
+function addPR() {
+  const ex = document.getElementById('prExercise').value.trim();
+  const val = document.getElementById('prValue').value.trim();
+  const dt = document.getElementById('prDate').value;
+  if (!ex || !val) return alert('Preenche o exercício e o valor!');
+  if (!state[cp].prs[ex]) state[cp].prs[ex] = [];
+  state[cp].prs[ex].unshift({ id: Date.now(), value: val, date: dt });
+  ['prExercise','prValue'].forEach(id => document.getElementById(id).value = '');
+  save(); closeModal('prModal'); renderPRs();
+}
+
+function deletePR(exercise, id) {
+  if (!confirm('Remover este PR?')) return;
+  state[cp].prs[exercise] = state[cp].prs[exercise].filter(p => p.id !== id);
+  if (state[cp].prs[exercise].length === 0) delete state[cp].prs[exercise];
+  save(); renderPRs();
+}
+
+function renderPRs() {
+  if (!cp) return;
+  const prs = state[cp].prs;
+  const list = document.getElementById('prsList');
+  const exercises = Object.keys(prs);
+  if (exercises.length === 0) {
+    list.innerHTML = `<div style="text-align:center;color:var(--muted);font-size:13px;padding:12px">Sem PRs registados.</div>`;
+    return;
+  }
+  list.innerHTML = exercises.map(ex => {
+    const records = prs[ex];
+    const best = records[0];
+    return `
+      <div style="background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;color:var(--accent2)">${ex}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatDate(best.date)}${records.length > 1 ? ' · ' + records.length + ' registos' : ''}</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <div style="font-family:'Bebas Neue';font-size:24px;color:var(--text)">${best.value}</div>
+            <button onclick="deletePR('${ex.replace(/'/g, "\\'")}',${best.id})" class="meal-delete">×</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCalendar() {
+  if (!cp) return;
+  const wrap = document.getElementById('trainingCalendarWrap');
+  const trainings = state[cp].trainings;
+  if (trainings.length === 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  const monthNames = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+  document.getElementById('calendarTitle').textContent = monthNames[month].toUpperCase() + ' ' + year;
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const trainedDays = new Set(trainings.filter(t => {
+    const d = new Date(t.date);
+    return d.getMonth() === month && d.getFullYear() === year;
+  }).map(t => parseInt(t.date.split('-')[2])));
+
+  const accent = cp === 'g' ? '#e8ff47' : '#ff6b9d';
+  const todayDay = now.getDate();
+
+  let html = `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center">`;
+  ['D','S','T','Q','Q','S','S'].forEach(d => {
+    html += `<div style="font-size:11px;color:var(--muted);padding:4px">${d}</div>`;
+  });
+  for (let i = 0; i < firstDay; i++) html += `<div></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const trained = trainedDays.has(d);
+    const isToday = d === todayDay;
+    let style = 'aspect-ratio:1;display:flex;align-items:center;justify-content:center;font-size:13px;border-radius:8px;';
+    if (trained) style += `background:${accent};color:#0d0d0f;font-weight:700;`;
+    else style += 'background:var(--surface2);color:var(--muted);';
+    if (isToday) style += `border:2px solid ${trained ? '#0d0d0f' : accent};`;
+    html += `<div style="${style}">${d}</div>`;
+  }
+  html += `</div>`;
+  html += `<div style="margin-top:12px;font-size:12px;color:var(--muted);text-align:center">${trainedDays.size} treinos este mês</div>`;
+  document.getElementById('trainingCalendar').innerHTML = html;
+}
+
 function deleteTraining(id) { state[cp].trainings = state[cp].trainings.filter(t => t.id !== id); save(); renderTraining(); }
+
+function drawWeeklyChart() {
+  if (!cp) return;
+  const prof = PROFILES[cp];
+  const accent = cp === 'g' ? '#e8ff47' : '#ff6b9d';
+  const muted = '#6b6b7a';
+  const red = '#f87171';
+  const green = '#4ade80';
+
+  // Build last 7 days
+  const days = [];
+  const now = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(now);
+    d.setDate(d.getDate() - i);
+    const dateStr = d.toISOString().split('T')[0];
+    const meals = state[cp].meals.filter(m => m.date === dateStr);
+    const trainings = state[cp].trainings.filter(t => t.date === dateStr);
+    const kcal = meals.reduce((s,m) => s + m.kcal, 0);
+    const burned = trainings.reduce((s,t) => s + (t.kcal || 0), 0);
+    const protein = meals.reduce((s,m) => s + m.protein, 0);
+    days.push({ date: dateStr, kcal, burned, protein, label: ['D','S','T','Q','Q','S','S'][d.getDay()] });
+  }
+
+  const wrap = document.getElementById('weeklyStatsWrap');
+  const daysWithData = days.filter(d => d.kcal > 0);
+  if (daysWithData.length === 0) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  // Stats
+  const avgKcal = Math.round(daysWithData.reduce((s,d) => s + d.kcal, 0) / daysWithData.length);
+  const avgProtein = Math.round(daysWithData.reduce((s,d) => s + d.protein, 0) / daysWithData.length);
+  const netBalance = Math.round(daysWithData.reduce((s,d) => s + d.kcal - d.burned, 0) / daysWithData.length - prof.kcalGoal);
+
+  document.getElementById('avgKcal').textContent = avgKcal;
+  document.getElementById('avgProtein').textContent = avgProtein + 'g';
+  const nb = document.getElementById('netBalance');
+  nb.textContent = (netBalance > 0 ? '+' : '') + netBalance;
+  nb.style.color = netBalance > 0 ? red : green;
+
+  // Chart - bar chart of kcal per day
+  const canvas = document.getElementById('weeklyChart');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = 180;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 36, padR = 12, padT = 16, padB = 28;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+
+  const maxVal = Math.max(prof.kcalGoal * 1.2, ...days.map(d => d.kcal));
+
+  // Goal line
+  const goalY = padT + chartH - (prof.kcalGoal / maxVal) * chartH;
+  ctx.strokeStyle = green;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(padL, goalY); ctx.lineTo(w - padR, goalY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = green;
+  ctx.font = '10px DM Sans';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(prof.kcalGoal + ' kcal', padL + 4, goalY - 8);
+
+  // Bars
+  const barW = chartW / 7 * 0.6;
+  const gap = chartW / 7;
+  days.forEach((d, i) => {
+    const x = padL + gap * i + (gap - barW) / 2;
+    const barH = (d.kcal / maxVal) * chartH;
+    const y = padT + chartH - barH;
+
+    if (d.kcal > 0) {
+      const overGoal = d.kcal > prof.kcalGoal;
+      ctx.fillStyle = overGoal ? red : accent;
+      ctx.beginPath();
+      ctx.roundRect ? ctx.roundRect(x, y, barW, barH, 4) : ctx.rect(x, y, barW, barH);
+      ctx.fill();
+    } else {
+      ctx.fillStyle = '#2a2a32';
+      ctx.fillRect(x, padT + chartH - 2, barW, 2);
+    }
+
+    // Day label
+    ctx.fillStyle = muted;
+    ctx.font = '11px DM Sans';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText(d.label, x + barW/2, padT + chartH + 6);
+  });
+
+  // Y axis label
+  ctx.fillStyle = muted;
+  ctx.font = '10px DM Sans';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('0', padL - 6, padT + chartH);
+  ctx.fillText(Math.round(maxVal), padL - 6, padT);
+}
 
 function renderFood() {
   if (!cp) return;
@@ -626,7 +995,11 @@ function renderFood() {
   bar.className = `progress-bar ${c}` + (totalKcal > prof.kcalGoal ? ' over' : '');
 
   const list = document.getElementById('mealList');
-  if (todayMeals.length === 0) { list.innerHTML = `<div class="empty-state"><div class="icon">🍽️</div><p>Ainda sem refeições hoje.<br>Toca no + para adicionar!</p></div>`; return; }
+  if (todayMeals.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">🍽️</div><p>Ainda sem refeições hoje.<br>Toca no + para adicionar!</p></div>`;
+    drawWeeklyChart();
+    return;
+  }
   const order = ['pre','breakfast','lunch','snack','dinner'];
   const sorted = [...todayMeals].sort((a,b) => order.indexOf(a.type) - order.indexOf(b.type));
   list.innerHTML = sorted.map(m => `
@@ -640,6 +1013,109 @@ function renderFood() {
         <button class="meal-delete" onclick="deleteMeal(${m.id})">×</button>
       </div>
     </div>`).join('');
+  drawWeeklyChart();
+}
+
+function drawWeightChart() {
+  if (!cp) return;
+  const prof = PROFILES[cp];
+  const weights = [...state[cp].weights].reverse(); // oldest first
+  const wrap = document.getElementById('weightChartWrap');
+  if (weights.length < 2) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'block';
+
+  const canvas = document.getElementById('weightChart');
+  const dpr = window.devicePixelRatio || 1;
+  const w = canvas.clientWidth;
+  const h = 200;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, w, h);
+
+  const padL = 40, padR = 12, padT = 16, padB = 28;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+
+  const allKg = weights.map(x => x.kg).concat([prof.weightGoal]);
+  const minKg = Math.min(...allKg) - 1;
+  const maxKg = Math.max(...allKg) + 1;
+  const range = maxKg - minKg;
+
+  const accent = cp === 'g' ? '#e8ff47' : '#ff6b9d';
+  const muted = '#6b6b7a';
+  const green = '#4ade80';
+
+  // grid + Y labels
+  ctx.font = '10px DM Sans';
+  ctx.fillStyle = muted;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + (chartH / 4) * i;
+    const v = maxKg - (range / 4) * i;
+    ctx.strokeStyle = '#2a2a32';
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+    ctx.fillText(v.toFixed(1), padL - 6, y);
+  }
+
+  // goal line
+  const goalY = padT + ((maxKg - prof.weightGoal) / range) * chartH;
+  ctx.strokeStyle = green;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(padL, goalY); ctx.lineTo(w - padR, goalY); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = green;
+  ctx.textAlign = 'left';
+  ctx.fillText('Objetivo ' + prof.weightGoal + 'kg', padL + 4, goalY - 8);
+
+  // data line
+  const points = weights.map((w_, i) => ({
+    x: padL + (chartW / Math.max(1, weights.length - 1)) * i,
+    y: padT + ((maxKg - w_.kg) / range) * chartH,
+    kg: w_.kg,
+    date: w_.date
+  }));
+
+  // gradient fill
+  const grad = ctx.createLinearGradient(0, padT, 0, padT + chartH);
+  grad.addColorStop(0, accent + '40');
+  grad.addColorStop(1, accent + '00');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, padT + chartH);
+  points.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(points[points.length - 1].x, padT + chartH);
+  ctx.closePath();
+  ctx.fill();
+
+  // line
+  ctx.strokeStyle = accent;
+  ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  points.forEach((p, i) => i === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y));
+  ctx.stroke();
+
+  // points
+  points.forEach(p => {
+    ctx.fillStyle = accent;
+    ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0d0d0f';
+    ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // X labels (first, middle, last)
+  ctx.fillStyle = muted;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const labelIdx = weights.length <= 3 ? weights.map((_, i) => i) : [0, Math.floor(weights.length / 2), weights.length - 1];
+  labelIdx.forEach(i => {
+    const p = points[i];
+    const d = weights[i].date.split('-');
+    ctx.fillText(`${d[2]}/${d[1]}`, p.x, padT + chartH + 6);
+  });
 }
 
 function renderWeight() {
@@ -664,23 +1140,121 @@ function renderWeight() {
     if (prev) { const diff = (w.kg - prev.kg).toFixed(1); delta = `<span class="delta-badge ${diff <= 0 ? 'delta-down' : 'delta-up'}">${diff <= 0 ? '' : '+'}${diff}kg</span>`; }
     return `<div class="weight-history-item"><div><div class="wdate">${formatDate(w.date)}${w.note ? ' · ' + w.note : ''}</div></div><div style="display:flex;align-items:center;gap:10px">${delta}<div class="wkg">${w.kg}kg</div><button class="meal-delete" onclick="deleteWeight(${w.id})">×</button></div></div>`;
   }).join('');
+  drawWeightChart();
 }
 
 function renderTraining() {
   if (!cp) return;
   const trainings = state[cp].trainings;
+  renderCalendar();
+  renderPRs();
   const list = document.getElementById('trainingList');
   if (trainings.length === 0) { list.innerHTML = `<div class="empty-state"><div class="icon">🏋️</div><p>Regista o teu treino com o +</p></div>`; return; }
   list.innerHTML = trainings.map(t => `
     <div class="workout-card">
       <div class="workout-header">
-        <div><div class="workout-type">${t.type}</div><div class="workout-date">${formatDate(t.date)}</div></div>
+        <div><div class="workout-type">${t.feeling ? t.feeling + ' ' : ''}${t.type}</div><div class="workout-date">${formatDate(t.date)}</div></div>
         <button class="workout-delete" onclick="deleteTraining(${t.id})">×</button>
       </div>
       <div class="workout-desc">${t.desc}</div>
       ${t.result ? `<div class="workout-result">🎯 ${t.result}</div>` : ''}
       ${t.kcal ? `<div class="workout-kcal">🔥 ~${t.kcal} kcal queimadas</div>` : ''}
+      ${t.notes ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);font-style:italic">"${t.notes}"</div>` : ''}
     </div>`).join('');
+}
+
+function showDailySummary() {
+  if (!cp) return;
+  const prof = PROFILES[cp];
+  const c = cp === 'g' ? 'cg' : 'cs';
+  const todayMeals = state[cp].meals.filter(m => m.date === today());
+  const todayTrainings = state[cp].trainings.filter(t => t.date === today());
+
+  const totalKcal = todayMeals.reduce((s,m) => s+m.kcal, 0);
+  const totalProtein = todayMeals.reduce((s,m) => s+m.protein, 0);
+  const totalCarbs = todayMeals.reduce((s,m) => s+m.carbs, 0);
+  const totalFat = todayMeals.reduce((s,m) => s+m.fat, 0);
+  const burned = todayTrainings.reduce((s,t) => s+(t.kcal||0), 0);
+  const net = totalKcal - burned;
+  const balance = net - prof.kcalGoal;
+
+  const order = ['pre','breakfast','lunch','snack','dinner'];
+  const sortedMeals = [...todayMeals].sort((a,b) => order.indexOf(a.type) - order.indexOf(b.type));
+
+  let html = `
+    <div style="background:var(--surface2);border-radius:14px;padding:16px;margin-bottom:14px;text-align:center">
+      <div style="font-family:'Bebas Neue';font-size:48px;color:var(--accent${cp==='s'?'-silvia':''})">${totalKcal}</div>
+      <div style="font-size:12px;color:var(--muted)">kcal · objetivo ${prof.kcalGoal}</div>
+      <div style="margin-top:10px;display:flex;justify-content:center;gap:14px;font-size:12px;color:var(--muted)">
+        <span>🥩 ${totalProtein}g</span>
+        <span>🍚 ${totalCarbs}g</span>
+        <span>🥑 ${totalFat}g</span>
+      </div>
+      ${burned > 0 ? `<div style="margin-top:8px;font-size:12px;color:var(--accent2)">🔥 -${burned} kcal queimadas</div>` : ''}
+      <div style="margin-top:8px;font-size:13px;color:${balance > 0 ? 'var(--red)' : 'var(--green)'};font-weight:600">
+        Balanço: ${balance > 0 ? '+' : ''}${balance} kcal
+      </div>
+    </div>
+  `;
+
+  if (sortedMeals.length > 0) {
+    html += `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Refeições</div>`;
+    sortedMeals.forEach(m => {
+      html += `<div style="background:var(--surface2);border-radius:10px;padding:8px 12px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:13px">
+        <span>${typeEmojis[m.type]} ${m.name}</span><span class="${c}" style="font-weight:600">${m.kcal} kcal</span>
+      </div>`;
+    });
+  }
+
+  if (todayTrainings.length > 0) {
+    html += `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px">Treinos</div>`;
+    todayTrainings.forEach(t => {
+      html += `<div style="background:var(--surface2);border-radius:10px;padding:8px 12px;margin-bottom:4px;font-size:13px">
+        ${t.feeling ? t.feeling + ' ' : ''}<b>${t.type}</b> — ${t.desc}${t.kcal ? ` <span style="color:var(--accent2)">(${t.kcal} kcal)</span>` : ''}
+      </div>`;
+    });
+  }
+
+  if (sortedMeals.length === 0 && todayTrainings.length === 0) {
+    html += `<div style="text-align:center;color:var(--muted);padding:20px">Sem registos hoje.</div>`;
+  }
+
+  document.getElementById('summaryContent').innerHTML = html;
+  document.getElementById('summaryTitle').textContent = `RESUMO · ${formatDate(today())}`;
+  document.getElementById('summaryModal').classList.add('open');
+}
+
+function exportSummary() {
+  if (!cp) return;
+  const prof = PROFILES[cp];
+  const todayMeals = state[cp].meals.filter(m => m.date === today());
+  const todayTrainings = state[cp].trainings.filter(t => t.date === today());
+  const totalKcal = todayMeals.reduce((s,m) => s+m.kcal, 0);
+  const totalProtein = todayMeals.reduce((s,m) => s+m.protein, 0);
+  const burned = todayTrainings.reduce((s,t) => s+(t.kcal||0), 0);
+
+  let txt = `📊 ${prof.name} · ${formatDate(today())}\n\n`;
+  txt += `🔥 ${totalKcal} kcal (objetivo ${prof.kcalGoal})\n`;
+  txt += `🥩 ${totalProtein}g proteína\n`;
+  if (burned > 0) txt += `💪 ${burned} kcal queimadas\n`;
+  txt += `\n`;
+
+  const order = ['pre','breakfast','lunch','snack','dinner'];
+  const sorted = [...todayMeals].sort((a,b) => order.indexOf(a.type) - order.indexOf(b.type));
+  if (sorted.length > 0) {
+    txt += `🍽️ Refeições:\n`;
+    sorted.forEach(m => txt += `· ${m.name} — ${m.kcal} kcal\n`);
+  }
+  if (todayTrainings.length > 0) {
+    txt += `\n🏋️ Treinos:\n`;
+    todayTrainings.forEach(t => txt += `· ${t.type}: ${t.desc}${t.result ? ' — ' + t.result : ''}\n`);
+  }
+
+  navigator.clipboard.writeText(txt).then(() => {
+    const btn = document.getElementById('exportBtn');
+    btn.textContent = '✅ Copiado!';
+    setTimeout(() => btn.textContent = '📋 Copiar', 2000);
+  }).catch(() => alert('Erro ao copiar. Tenta novamente.'));
 }
 
 function renderAll() { renderFood(); renderWeight(); renderTraining(); }
