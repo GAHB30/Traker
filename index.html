@@ -271,6 +271,7 @@
     <div class="logo cg" id="headerLogo">G·TRACKER</div>
     <div class="header-right">
       <button class="switch-btn" onclick="showDailySummary()" style="background:none;border:none;font-size:18px;padding:0 6px">📊</button>
+      <button class="switch-btn" id="syncBtn" onclick="resyncFromCloud('manual')" style="background:none;border:none;font-size:16px;padding:0 6px;opacity:0.6;transition:transform 0.5s ease,opacity 0.2s">🔄</button>
       <div class="date-badge" id="todayDate"></div>
       <button class="switch-btn" onclick="goToProfiles()">↩ Perfil</button>
     </div>
@@ -653,9 +654,37 @@ async function loadFromCloud() {
   return false;
 }
 
+// Refresca desde la nube y vuelve a renderizar la vista actual.
+// Se usa para: cambio de visibilidad, reconexión a internet, botón manual.
+let lastSyncAt = Date.now();
+let syncing = false;
+
+async function resyncFromCloud(reason) {
+  if (syncing) return;
+  syncing = true;
+  showSyncIndicator(true);
+  try {
+    const loaded = await loadFromCloud();
+    if (loaded && cp) renderAll();
+    lastSyncAt = Date.now();
+  } finally {
+    syncing = false;
+    showSyncIndicator(false);
+  }
+}
+
+function showSyncIndicator(active) {
+  const btn = document.getElementById('syncBtn');
+  if (!btn) return;
+  btn.style.opacity = active ? '1' : '0.6';
+  btn.style.transform = active ? 'rotate(360deg)' : 'rotate(0deg)';
+  btn.disabled = active;
+}
+
 function save() {
   localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
   saveToCloud();
+  lastSyncAt = Date.now(); // acabamos de subir, no hace falta bajar
 }
 function load() {
   const d = localStorage.getItem('gs_tracker_v3');
@@ -741,6 +770,21 @@ document.getElementById('weightDate').value = today();
 // Load from cloud on start
 loadFromCloud().then(loaded => {
   if (loaded) renderAll();
+});
+
+// AUTO-REFRESH: cuando vuelves a la pestaña/app después de >5s fuera, refresca desde Supabase
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    const elapsed = Date.now() - lastSyncAt;
+    if (elapsed > 5000) {
+      resyncFromCloud('visibility');
+    }
+  }
+});
+
+// AUTO-REFRESH: cuando vuelve la conexión a internet
+window.addEventListener('online', () => {
+  resyncFromCloud('online');
 });
 
 function selectProfile(p) {
