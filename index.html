@@ -614,12 +614,9 @@ function clearDirty(profile, sinceTs) {
 }
 
 async function saveToCloud() {
-  // Marcar AMBOS perfiles como "dirty" porque saveToCloud sube ambos.
-  // En la práctica solo uno tiene cambios reales, pero es seguro marcar los dos.
+  // El dirty flag ya fue marcado síncronamente por save() antes de llamarnos.
+  // Snapshot del state al momento de iniciar el save (para detectar cambios concurrentes).
   const startTs = Date.now();
-  markDirty('g');
-  markDirty('s');
-  // Snapshot del state al momento de iniciar el save (para detectar cambios concurrentes)
   const snapshot = {
     g: JSON.stringify(state.g),
     s: JSON.stringify(state.s)
@@ -731,7 +728,13 @@ function showSyncIndicator(active) {
 }
 
 function save() {
+  // 1. Marcar perfiles como "dirty" ANTES de cualquier operación async.
+  //    Garantizamos que si la app se suspende a mitad, el flag quedó persistido.
+  markDirty('g');
+  markDirty('s');
+  // 2. Persistir state en localStorage (síncrono, instantáneo)
   localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+  // 3. Disparar la subida a Supabase (async, fire-and-forget)
   saveToCloud();
   lastSyncAt = Date.now(); // acabamos de subir, no hace falta bajar
 }
