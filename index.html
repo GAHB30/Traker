@@ -584,7 +584,75 @@ function updateDayLabel() {
 
 let state = { g: { meals:[], weights:[], trainings:[], favorites:[], prs:{} }, s: { meals:[], weights:[], trainings:[], favorites:[], prs:{} } };
 
-function save() { localStorage.setItem('gs_tracker_v3', JSON.stringify(state)); }
+const SUPABASE_URL = 'https://xwjcapwrkkbxjthpznzo.supabase.co';
+const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3amNhcHdya2tieGp0aHB6bnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NzQ4MTksImV4cCI6MjA5MzA1MDgxOX0.ne4al9iGLHTuR7eW2r4Kjfi07GZsGKe8XaT907-zCAM';
+
+async function saveToCloud() {
+  try {
+    for (const profile of ['g', 's']) {
+      const existing = await fetch(`${SUPABASE_URL}/rest/v1/tracker_data?profile=eq.${profile}`, {
+        headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+      });
+      const rows = await existing.json();
+      
+      if (rows.length > 0) {
+        await fetch(`${SUPABASE_URL}/rest/v1/tracker_data?profile=eq.${profile}`, {
+          method: 'PATCH',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({ data: state[profile], updated_at: new Date().toISOString() })
+        });
+      } else {
+        await fetch(`${SUPABASE_URL}/rest/v1/tracker_data`, {
+          method: 'POST',
+          headers: {
+            'apikey': SUPABASE_KEY,
+            'Authorization': `Bearer ${SUPABASE_KEY}`,
+            'Content-Type': 'application/json',
+            'Prefer': 'return=minimal'
+          },
+          body: JSON.stringify({ profile, data: state[profile] })
+        });
+      }
+    }
+    localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+  } catch(e) {
+    localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+    console.error('Cloud save failed:', e);
+  }
+}
+
+async function loadFromCloud() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/tracker_data`, {
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
+    });
+    const rows = await res.json();
+    if (rows && rows.length > 0) {
+      rows.forEach(row => {
+        if (row.profile && row.data) {
+          state[row.profile] = row.data;
+          if (!state[row.profile].favorites) state[row.profile].favorites = [];
+          if (!state[row.profile].prs) state[row.profile].prs = {};
+        }
+      });
+      localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+      return true;
+    }
+  } catch(e) {
+    console.error('Cloud load failed:', e);
+  }
+  return false;
+}
+
+function save() {
+  localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+  saveToCloud();
+}
 function load() {
   const d = localStorage.getItem('gs_tracker_v3');
   if (d) try {
@@ -665,6 +733,11 @@ function formatDate(d) { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}
 load();
 document.getElementById('todayDate').textContent = formatDate(today());
 document.getElementById('weightDate').value = today();
+
+// Load from cloud on start
+loadFromCloud().then(loaded => {
+  if (loaded) renderAll();
+});
 
 function selectProfile(p) {
   cp = p;
