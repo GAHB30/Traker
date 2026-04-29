@@ -613,7 +613,31 @@ function clearDirty(profile, sinceTs) {
   }
 }
 
+// Bandera global: solo permitimos saveToCloud() después de que loadFromCloud() haya
+// completado al menos una vez. Esto evita el bug clásico de la PWA fresca:
+// si el state empieza vacío, NO sobrescribir Supabase con vacío.
+let cloudLoaded = false;
+
+// Comprueba si un perfil está "vacío" (sin contenido del usuario).
+// Un perfil vacío no debería sobrescribir un perfil con datos en Supabase.
+function isProfileEmpty(p) {
+  return (
+    (!p.meals || p.meals.length === 0) &&
+    (!p.weights || p.weights.length === 0) &&
+    (!p.trainings || p.trainings.length === 0) &&
+    (!p.favorites || p.favorites.length === 0) &&
+    (!p.prs || Object.keys(p.prs).length === 0)
+  );
+}
+
 async function saveToCloud() {
+  // PROTECCIÓN 1: si todavía no hemos cargado de la nube, NO subir nada.
+  // Sin esto, una PWA fresca subiría su state vacío sobre los datos buenos.
+  if (!cloudLoaded) {
+    console.log('[sync] saveToCloud bloqueado: aún no se ha cargado de la nube');
+    return;
+  }
+
   // El dirty flag ya fue marcado síncronamente por save() antes de llamarnos.
   // Snapshot del state al momento de iniciar el save (para detectar cambios concurrentes).
   const startTs = Date.now();
@@ -623,11 +647,22 @@ async function saveToCloud() {
   };
   try {
     for (const profile of ['g', 's']) {
+      const localData = JSON.parse(snapshot[profile]);
+
+      // PROTECCIÓN 2: si el perfil local está vacío, comprobar la nube antes de subir.
+      // Si la nube tiene datos, NO sobrescribir (evita borrar datos por error).
       const existing = await fetch(`${SUPABASE_URL}/rest/v1/tracker_data?profile=eq.${profile}`, {
         headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
       });
       const rows = await existing.json();
-      
+
+      if (isProfileEmpty(localData) && rows.length > 0 && !isProfileEmpty(rows[0].data)) {
+        console.warn(`[sync] Perfil ${profile} local está vacío pero la nube tiene datos. NO sobrescribir.`);
+        // Limpiamos el dirty flag para no reintentar este "save vacío"
+        clearDirty(profile, startTs);
+        continue;
+      }
+
       if (rows.length > 0) {
         await fetch(`${SUPABASE_URL}/rest/v1/tracker_data?profile=eq.${profile}`, {
           method: 'PATCH',
@@ -637,7 +672,7 @@ async function saveToCloud() {
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
-          body: JSON.stringify({ data: JSON.parse(snapshot[profile]), updated_at: new Date().toISOString() })
+          body: JSON.stringify({ data: localData, updated_at: new Date().toISOString() })
         });
       } else {
         await fetch(`${SUPABASE_URL}/rest/v1/tracker_data`, {
@@ -648,7 +683,7 @@ async function saveToCloud() {
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
-          body: JSON.stringify({ profile, data: JSON.parse(snapshot[profile]) })
+          body: JSON.stringify({ profile, data: localData })
         });
       }
       // Solo limpiar dirty si nadie modificó este perfil después de empezar el save
@@ -688,14 +723,20 @@ async function loadFromCloud() {
         }
       });
       localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+      // ¡IMPORTANTE! Marcar que ya cargamos de la nube — desbloquea saveToCloud
+      cloudLoaded = true;
       // Si quedaron cambios pendientes, dispararlos ahora
       if (pendingUpload) {
         saveToCloud();
       }
       return true;
     }
+    // Si no hay filas en la nube, también marcamos cloudLoaded = true
+    // (es una nube vacía pero válida — primer uso)
+    cloudLoaded = true;
   } catch(e) {
     console.error('Cloud load failed:', e);
+    // NO marcamos cloudLoaded — queremos que se reintente
   }
   return false;
 }
