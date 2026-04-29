@@ -592,7 +592,38 @@ let state = { g: { meals:[], weights:[], trainings:[], favorites:[], prs:{} }, s
 const SUPABASE_URL = 'https://xwjcapwrkkbxjthpznzo.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3amNhcHdya2tieGp0aHB6bnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NzQ4MTksImV4cCI6MjA5MzA1MDgxOX0.ne4al9iGLHTuR7eW2r4Kjfi07GZsGKe8XaT907-zCAM';
 
+// === SYNC STATE ===
+// dirtyProfiles: perfiles con cambios locales que aún no se han confirmado en la nube
+// loadDirty/saveDirty leen/escriben en localStorage para sobrevivir reloads
+function getDirtyProfiles() {
+  try { return JSON.parse(localStorage.getItem('gs_tracker_dirty') || '{}'); }
+  catch(e) { return {}; }
+}
+function markDirty(profile) {
+  const d = getDirtyProfiles();
+  d[profile] = Date.now();
+  localStorage.setItem('gs_tracker_dirty', JSON.stringify(d));
+}
+function clearDirty(profile, sinceTs) {
+  const d = getDirtyProfiles();
+  // Solo limpiar si no se modificó otra vez después de iniciar este save
+  if (d[profile] && d[profile] <= sinceTs) {
+    delete d[profile];
+    localStorage.setItem('gs_tracker_dirty', JSON.stringify(d));
+  }
+}
+
 async function saveToCloud() {
+  // Marcar AMBOS perfiles como "dirty" porque saveToCloud sube ambos.
+  // En la práctica solo uno tiene cambios reales, pero es seguro marcar los dos.
+  const startTs = Date.now();
+  markDirty('g');
+  markDirty('s');
+  // Snapshot del state al momento de iniciar el save (para detectar cambios concurrentes)
+  const snapshot = {
+    g: JSON.stringify(state.g),
+    s: JSON.stringify(state.s)
+  };
   try {
     for (const profile of ['g', 's']) {
       const existing = await fetch(`${SUPABASE_URL}/rest/v1/tracker_data?profile=eq.${profile}`, {
@@ -609,7 +640,7 @@ async function saveToCloud() {
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
-          body: JSON.stringify({ data: state[profile], updated_at: new Date().toISOString() })
+          body: JSON.stringify({ data: JSON.parse(snapshot[profile]), updated_at: new Date().toISOString() })
         });
       } else {
         await fetch(`${SUPABASE_URL}/rest/v1/tracker_data`, {
@@ -620,14 +651,19 @@ async function saveToCloud() {
             'Content-Type': 'application/json',
             'Prefer': 'return=minimal'
           },
-          body: JSON.stringify({ profile, data: state[profile] })
+          body: JSON.stringify({ profile, data: JSON.parse(snapshot[profile]) })
         });
+      }
+      // Solo limpiar dirty si nadie modificó este perfil después de empezar el save
+      if (JSON.stringify(state[profile]) === snapshot[profile]) {
+        clearDirty(profile, startTs);
       }
     }
     localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
   } catch(e) {
     localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
     console.error('Cloud save failed:', e);
+    // En caso de error, los perfiles quedan dirty y se reintentarán en el próximo save/sync
   }
 }
 
@@ -638,14 +674,27 @@ async function loadFromCloud() {
     });
     const rows = await res.json();
     if (rows && rows.length > 0) {
+      const dirty = getDirtyProfiles();
+      let pendingUpload = false;
       rows.forEach(row => {
         if (row.profile && row.data) {
+          // PROTECCIÓN ANTI-SOBRESCRITURA:
+          // si este perfil tiene cambios locales no subidos, NO bajar la nube.
+          if (dirty[row.profile]) {
+            console.log(`[sync] Perfil ${row.profile} tiene cambios locales pendientes, no sobrescribir`);
+            pendingUpload = true;
+            return;
+          }
           state[row.profile] = row.data;
           if (!state[row.profile].favorites) state[row.profile].favorites = [];
           if (!state[row.profile].prs) state[row.profile].prs = {};
         }
       });
       localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
+      // Si quedaron cambios pendientes, dispararlos ahora
+      if (pendingUpload) {
+        saveToCloud();
+      }
       return true;
     }
   } catch(e) {
