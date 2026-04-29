@@ -281,6 +281,11 @@
 
 <div class="content">
   <div class="page active" id="page-food">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <button onclick="changeDay(-1)" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 14px;color:var(--text);cursor:pointer;font-size:18px">‹</button>
+      <div id="selectedDayLabel" style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;color:var(--muted)">HOJE</div>
+      <button onclick="changeDay(1)" id="nextDayBtn" style="background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:8px 14px;color:var(--text);cursor:pointer;font-size:18px">›</button>
+    </div>
     <div class="macros-card">
       <div class="macros-title">HOJE</div>
       <div class="kcal-display">
@@ -337,6 +342,11 @@
     </div>
 
     <div class="section-title">TREINOS</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button onclick="setTrainingFilter('all')" id="filterAll" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border);background:var(--accent);color:var(--bg);cursor:pointer;font-family:'DM Sans';font-size:12px;font-weight:600">Todos</button>
+      <button onclick="setTrainingFilter('month')" id="filterMonth" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-family:'DM Sans';font-size:12px">Este mês</button>
+      <button onclick="setTrainingFilter('week')" id="filterWeek" style="flex:1;padding:8px;border-radius:10px;border:1px solid var(--border);background:var(--surface2);color:var(--muted);cursor:pointer;font-family:'DM Sans';font-size:12px">Esta semana</button>
+    </div>
     <div id="trainingList"><div class="empty-state"><div class="icon">🏋️</div><p>Regista o teu treino com o +</p></div></div>
   </div>
 
@@ -377,6 +387,10 @@
 <div class="modal-overlay" id="foodModal">
   <div class="modal">
     <div class="modal-title cg" id="foodModalTitle">ADICIONAR REFEIÇÃO</div>
+    <div class="input-group">
+      <label>Data</label>
+      <input type="date" id="mealDate">
+    </div>
 
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button onclick="openFavorites()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px;color:var(--text);cursor:pointer;font-family:'DM Sans';font-size:13px">⭐ Favoritos</button>
@@ -436,6 +450,10 @@
 <div class="modal-overlay" id="trainingModal">
   <div class="modal">
     <div class="modal-title cg" id="trainingModalTitle">REGISTAR TREINO</div>
+    <div class="input-group">
+      <label>Data</label>
+      <input type="date" id="trainingDate">
+    </div>
     <div class="input-group">
       <label>Tipo</label>
       <select id="trainingType">
@@ -530,6 +548,39 @@ const PROFILES = {
 
 let cp = null; // current profile
 let currentPage = 'food';
+let selectedDayOffset = 0; // 0 = today, -1 = yesterday, etc.
+
+function selectedDay() {
+  const d = new Date();
+  d.setDate(d.getDate() + selectedDayOffset);
+  return d.toISOString().split('T')[0];
+}
+
+function changeDay(delta) {
+  const newOffset = selectedDayOffset + delta;
+  if (newOffset > 0) return; // can't go to future
+  selectedDayOffset = newOffset;
+  updateDayLabel();
+  renderFood();
+}
+
+function updateDayLabel() {
+  const label = document.getElementById('selectedDayLabel');
+  const nextBtn = document.getElementById('nextDayBtn');
+  if (selectedDayOffset === 0) {
+    label.textContent = 'HOJE';
+    nextBtn.style.opacity = '0.3';
+    nextBtn.style.pointerEvents = 'none';
+  } else if (selectedDayOffset === -1) {
+    label.textContent = 'ONTEM';
+    nextBtn.style.opacity = '1';
+    nextBtn.style.pointerEvents = 'auto';
+  } else {
+    label.textContent = formatDate(selectedDay());
+    nextBtn.style.opacity = '1';
+    nextBtn.style.pointerEvents = 'auto';
+  }
+}
 
 let state = { g: { meals:[], weights:[], trainings:[], favorites:[], prs:{} }, s: { meals:[], weights:[], trainings:[], favorites:[], prs:{} } };
 
@@ -617,6 +668,7 @@ document.getElementById('weightDate').value = today();
 
 function selectProfile(p) {
   cp = p;
+  selectedDayOffset = 0;
   document.getElementById('profileScreen').style.display = 'none';
   document.getElementById('mainApp').style.display = 'block';
   applyTheme();
@@ -692,12 +744,14 @@ function switchPage(page) {
 
 function openModal() {
   if (currentPage === 'food') {
+    document.getElementById('mealDate').value = selectedDay();
     document.getElementById('aiResult').style.display = 'none';
     document.getElementById('foodModal').classList.add('open');
   } else if (currentPage === 'weight') {
     document.getElementById('weightDate').value = today();
     document.getElementById('weightModal').classList.add('open');
-  } else {
+  } else if (currentPage === 'training') {
+    document.getElementById('trainingDate').value = today();
     document.getElementById('aiTrainingResult').style.display = 'none';
     document.getElementById('trainingModal').classList.add('open');
   }
@@ -770,8 +824,9 @@ function addMeal(saveAsFavorite) {
   const name = document.getElementById('mealName').value.trim();
   const kcal = parseInt(document.getElementById('mealKcal').value) || 0;
   if (!name || !kcal) return alert('Preenche o nome e as calorias!');
+  const mealDate = document.getElementById('mealDate').value || selectedDay();
   const meal = {
-    id: Date.now(), date: today(),
+    id: Date.now(), date: mealDate,
     type: document.getElementById('mealType').value, name, kcal,
     protein: parseInt(document.getElementById('mealProtein').value) || 0,
     carbs: parseInt(document.getElementById('mealCarbs').value) || 0,
@@ -864,8 +919,9 @@ function deleteWeight(id) { state[cp].weights = state[cp].weights.filter(w => w.
 function addTraining() {
   const desc = document.getElementById('trainingDesc').value.trim();
   if (!desc) return alert('Descreve o treino!');
+  const trainingDate = document.getElementById('trainingDate').value || today();
   state[cp].trainings.unshift({
-    id: Date.now(), date: today(),
+    id: Date.now(), date: trainingDate,
     type: document.getElementById('trainingType').value, desc,
     result: document.getElementById('trainingResult').value.trim(),
     kcal: parseInt(document.getElementById('trainingKcal').value) || 0,
@@ -1080,9 +1136,10 @@ function drawWeeklyChart() {
 
 function renderFood() {
   if (!cp) return;
+  updateDayLabel();
   const prof = PROFILES[cp];
   const c = cp === 'g' ? 'cg' : 'cs';
-  const todayMeals = state[cp].meals.filter(m => m.date === today());
+  const todayMeals = state[cp].meals.filter(m => m.date === selectedDay());
   const totalKcal = todayMeals.reduce((s,m) => s+m.kcal, 0);
   const totalProtein = todayMeals.reduce((s,m) => s+m.protein, 0);
   const totalCarbs = todayMeals.reduce((s,m) => s+m.carbs, 0);
@@ -1251,13 +1308,41 @@ function renderWeight() {
   drawWeightChart();
 }
 
+let trainingFilter = 'all';
+
+function setTrainingFilter(f) {
+  trainingFilter = f;
+  ['all','month','week'].forEach(x => {
+    const btn = document.getElementById('filter' + x.charAt(0).toUpperCase() + x.slice(1));
+    if (btn) {
+      btn.style.background = x === f ? 'var(--accent)' : 'var(--surface2)';
+      btn.style.color = x === f ? 'var(--bg)' : 'var(--muted)';
+    }
+  });
+  renderTraining();
+}
+
 function renderTraining() {
   if (!cp) return;
-  const trainings = state[cp].trainings;
+  let trainings = state[cp].trainings;
+
+  // Apply filter
+  const now = new Date();
+  if (trainingFilter === 'month') {
+    trainings = trainings.filter(t => {
+      const d = new Date(t.date);
+      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+    });
+  } else if (trainingFilter === 'week') {
+    const weekAgo = new Date();
+    weekAgo.setDate(weekAgo.getDate() - 7);
+    trainings = trainings.filter(t => new Date(t.date) >= weekAgo);
+  }
+
   renderCalendar();
   renderPRs();
   const list = document.getElementById('trainingList');
-  if (trainings.length === 0) { list.innerHTML = `<div class="empty-state"><div class="icon">🏋️</div><p>Regista o teu treino com o +</p></div>`; return; }
+  if (trainings.length === 0) { list.innerHTML = `<div class="empty-state"><div class="icon">🏋️</div><p>Sem treinos neste período.</p></div>`; return; }
   list.innerHTML = trainings.map(t => `
     <div class="workout-card">
       <div class="workout-header">
