@@ -399,7 +399,7 @@
 
     <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
       <button onclick="openFavorites()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px;color:var(--text);cursor:pointer;font-family:'DM Sans';font-size:13px">⭐ Favoritos</button>
-      <button onclick="copyYesterday()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px;color:var(--text);cursor:pointer;font-family:'DM Sans';font-size:13px">📋 Copiar Ontem</button>
+      <button onclick="copyYesterday()" style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:10px;color:var(--text);cursor:pointer;font-family:'DM Sans';font-size:13px">📋 Copiar Dia Anterior</button>
     </div>
 
     <div id="favoritesPanel" style="display:none;background:var(--surface2);border-radius:12px;padding:12px;margin-bottom:14px;max-height:240px;overflow-y:auto">
@@ -555,10 +555,17 @@ let cp = null; // current profile
 let currentPage = 'food';
 let selectedDayOffset = 0; // 0 = today, -1 = yesterday, etc.
 
+// FIX FECHAS UTC: toISOString() devuelve la fecha en UTC, no la local.
+// En Portugal (UTC+1 en verano) un registro entre las 00:00 y la 01:00
+// caía en el día anterior. localDateStr usa siempre la fecha LOCAL.
+function localDateStr(d) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
 function selectedDay() {
   const d = new Date();
   d.setDate(d.getDate() + selectedDayOffset);
-  return d.toISOString().split('T')[0];
+  return localDateStr(d);
 }
 
 function changeDay(delta) {
@@ -591,6 +598,12 @@ let state = { g: { meals:[], weights:[], trainings:[], favorites:[], prs:{} }, s
 
 const SUPABASE_URL = 'https://xwjcapwrkkbxjthpznzo.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh3amNhcHdya2tieGp0aHB6bnpvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc0NzQ4MTksImV4cCI6MjA5MzA1MDgxOX0.ne4al9iGLHTuR7eW2r4Kjfi07GZsGKe8XaT907-zCAM';
+
+// FIX XSS: escapa HTML en cualquier texto introducido por el usuario
+// antes de insertarlo con innerHTML.
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
 
 // === SYNC STATE ===
 // dirtyProfiles: perfiles con cambios locales que aún no se han confirmado en la nube
@@ -638,15 +651,20 @@ async function saveToCloud() {
     return;
   }
 
-  // El dirty flag ya fue marcado síncronamente por save() antes de llamarnos.
-  // Snapshot del state al momento de iniciar el save (para detectar cambios concurrentes).
   const startTs = Date.now();
-  const snapshot = {
-    g: JSON.stringify(state.g),
-    s: JSON.stringify(state.s)
-  };
+
+  // FIX SYNC: subir SOLO los perfiles marcados como dirty.
+  // Antes se subían siempre los dos perfiles, así que el dispositivo A
+  // podía machacar en la nube los datos recientes del perfil del
+  // dispositivo B con su copia local antigua.
+  const dirtyNow = Object.keys(getDirtyProfiles()).filter(p => state[p]);
+  if (dirtyNow.length === 0) return;
+
+  const snapshot = {};
+  dirtyNow.forEach(p => { snapshot[p] = JSON.stringify(state[p]); });
+
   try {
-    for (const profile of ['g', 's']) {
+    for (const profile of dirtyNow) {
       const localData = JSON.parse(snapshot[profile]);
 
       // PROTECCIÓN 2: si el perfil local está vacío, comprobar la nube antes de subir.
@@ -722,6 +740,8 @@ async function loadFromCloud() {
           if (!state[row.profile].prs) state[row.profile].prs = {};
         }
       });
+      // FIX DEFINIÇÕES: las definições viajan dentro del perfil en la nube
+      applySettingsFromState();
       localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
       // ¡IMPORTANTE! Marcar que ya cargamos de la nube — desbloquea saveToCloud
       cloudLoaded = true;
@@ -769,10 +789,10 @@ function showSyncIndicator(active) {
 }
 
 function save() {
-  // 1. Marcar perfiles como "dirty" ANTES de cualquier operación async.
-  //    Garantizamos que si la app se suspende a mitad, el flag quedó persistido.
-  markDirty('g');
-  markDirty('s');
+  // FIX SYNC: marcar dirty SOLO el perfil activo. Antes se marcaban los dos,
+  // lo que provocaba subir (y machacar) el perfil de la otra persona.
+  // 1. Marcar ANTES de cualquier operación async para que sobreviva si la app se suspende.
+  if (cp) markDirty(cp);
   // 2. Persistir state en localStorage (síncrono, instantáneo)
   localStorage.setItem('gs_tracker_v3', JSON.stringify(state));
   // 3. Disparar la subida a Supabase (async, fire-and-forget)
@@ -788,7 +808,7 @@ function load() {
       if (!state[p].prs) state[p].prs = {};
     });
   } catch(e){}
-  // Load profile settings
+  // Migración: definições antiguas en localStorage (gs_tracker_settings)
   const settings = localStorage.getItem('gs_tracker_settings');
   if (settings) try {
     const s = JSON.parse(settings);
@@ -796,6 +816,18 @@ function load() {
       if (s[p]) Object.assign(PROFILES[p], s[p]);
     });
   } catch(e){}
+  // Las definições guardadas en el state (sincronizadas) tienen prioridad
+  applySettingsFromState();
+}
+
+// FIX DEFINIÇÕES: aplica al objeto PROFILES las definições guardadas
+// dentro de state[p].settings (que sí se sincroniza con Supabase).
+function applySettingsFromState() {
+  ['g','s'].forEach(p => {
+    if (state[p] && state[p].settings) Object.assign(PROFILES[p], state[p].settings);
+  });
+  const lbl = document.getElementById('weightGoalLbl');
+  if (cp && lbl) lbl.textContent = PROFILES[cp].weightGoal;
 }
 
 function saveSettings() {
@@ -807,10 +839,13 @@ function saveSettings() {
   PROFILES[cp].weightGoal = weightGoal;
   PROFILES[cp].weight = weight;
 
-  // Persist
+  // FIX DEFINIÇÕES: guardar dentro del state para que sincronice con Supabase
+  // y llegue a los otros dispositivos. Mantener también localStorage como fallback.
+  state[cp].settings = { kcalGoal, weightGoal, weight };
   const stored = JSON.parse(localStorage.getItem('gs_tracker_settings') || '{}');
   stored[cp] = { kcalGoal, weightGoal, weight };
   localStorage.setItem('gs_tracker_settings', JSON.stringify(stored));
+  save();
 
   const saved = document.getElementById('settingsSaved');
   saved.style.display = 'block';
@@ -853,7 +888,7 @@ function clearProfile() {
   alert('Dados apagados.');
 }
 
-function today() { return new Date().toISOString().split('T')[0]; }
+function today() { return localDateStr(new Date()); }
 function formatDate(d) { const p = d.split('-'); return `${p[2]}/${p[1]}/${p[0]}`; }
 
 load();
@@ -1106,14 +1141,36 @@ async function calcMacros() {
   btn.disabled = true; btn.textContent = '...';
   loading.style.display = 'block'; result.style.display = 'none';
   try {
-    const text = await aiCall(`És um nutricionista. Calcula os macros para: "${name}". Responde APENAS com JSON válido, sem texto extra, sem markdown: {"kcal": number, "protein": number, "carbs": number, "fat": number, "note": "string curta em português"}`);
+    // FIX KCAL INFLADAS: prompt con reglas explícitas (peso cocido, sin
+    // ingredientes inventados, porción caseira, valores de tablas estándar)
+    // + validación de coherencia kcal ≈ 4P + 4H + 9G.
+    const text = await aiCall(`És um nutricionista português. Calcula os macros para: "${name}".
+
+REGRAS OBRIGATÓRIAS:
+- Assume sempre peso COZINHADO/pronto a comer, exceto se o texto disser "cru"
+- Se não houver quantidade, assume uma porção caseira normal portuguesa (não de restaurante) e indica os gramas assumidos na note
+- NÃO adiciones azeite, molhos, pão ou acompanhamentos que não estejam descritos
+- Usa valores de tabelas nutricionais padrão (INSA/PortFIR, USDA)
+- As kcal devem ser coerentes com os macros: kcal ≈ proteína×4 + hidratos×4 + gordura×9
+- Em caso de dúvida entre dois valores, escolhe o mais conservador
+
+Responde APENAS com JSON válido, sem texto extra, sem markdown: {"kcal": number, "protein": number, "carbs": number, "fat": number, "note": "porção/peso assumido + observação curta em português"}`);
     const macros = JSON.parse(text.replace(/```json|```/g, '').trim());
+
+    // Validação de coerência: se as kcal divergem >12% do que dizem os macros,
+    // recalcular a partir dos macros (o modelo tende a inflar as kcal).
+    const computed = macros.protein * 4 + macros.carbs * 4 + macros.fat * 9;
+    if (computed > 0 && Math.abs(macros.kcal - computed) / computed > 0.12) {
+      macros.kcal = Math.round(computed);
+      macros.note = (macros.note || '') + ' · kcal ajustadas aos macros';
+    }
+
     document.getElementById('mealKcal').value = macros.kcal;
     document.getElementById('mealProtein').value = macros.protein;
     document.getElementById('mealCarbs').value = macros.carbs;
     document.getElementById('mealFat').value = macros.fat;
     result.style.display = 'block';
-    result.innerHTML = `✦ <b>${macros.kcal} kcal</b> · ${macros.protein}g prot · ${macros.carbs}g hidr · ${macros.fat}g gord<br><span style="color:var(--muted)">${macros.note}</span>`;
+    result.innerHTML = `✦ <b>${macros.kcal} kcal</b> · ${macros.protein}g prot · ${macros.carbs}g hidr · ${macros.fat}g gord<br><span style="color:var(--muted)">${esc(macros.note)}</span>`;
   } catch(e) {
     result.style.display = 'block';
     result.innerHTML = '⚠️ Erro ao calcular. Preenche manualmente.';
@@ -1132,11 +1189,21 @@ async function calcTrainingKcal() {
   btn.disabled = true; btn.textContent = '...';
   loading.style.display = 'block'; result.style.display = 'none';
   try {
-    const text = await aiCall(`És um personal trainer. Estima as calorias queimadas: tipo="${type}", descrição="${desc || type}", duração=${duration} minutos, peso=${weight}kg. Responde APENAS com JSON válido: {"kcal": number, "note": "string curta em português"}`);
+    // FIX KCAL DE TREINO: pedir kcal LÍQUIDAS (sem metabolismo basal),
+    // estimativa conservadora baseada em METs, contando pausas/descanso.
+    const text = await aiCall(`És um fisiologista do exercício. Estima as calorias queimadas: tipo="${type}", descrição="${desc || type}", duração=${duration} minutos, peso=${weight}kg.
+
+REGRAS OBRIGATÓRIAS:
+- Estima as kcal LÍQUIDAS do exercício (exclui o metabolismo basal que a pessoa queimaria de qualquer forma)
+- Usa valores de METs padrão (Compendium of Physical Activities) e sê conservador
+- Considera que a duração inclui pausas, descanso entre séries e aquecimento — não é intensidade máxima contínua
+- Em caso de dúvida, escolhe o valor mais baixo
+
+Responde APENAS com JSON válido, sem markdown: {"kcal": number, "note": "string curta em português a explicar a estimativa"}`);
     const data = JSON.parse(text.replace(/```json|```/g, '').trim());
     document.getElementById('trainingKcal').value = data.kcal;
     result.style.display = 'block';
-    result.innerHTML = `✦ <b>~${data.kcal} kcal</b> queimadas<br><span style="color:var(--muted)">${data.note}</span>`;
+    result.innerHTML = `✦ <b>~${data.kcal} kcal</b> queimadas<br><span style="color:var(--muted)">${esc(data.note)}</span>`;
   } catch(e) {
     result.style.display = 'block';
     result.innerHTML = '⚠️ Erro ao calcular. Preenche manualmente.';
@@ -1196,7 +1263,7 @@ function openFavorites() {
   list.innerHTML = favs.map(f => `
     <div onclick="useFavorite(${f.id})" style="background:var(--surface);border-radius:10px;padding:10px 12px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
       <div style="flex:1">
-        <div style="font-size:14px">${f.name}</div>
+        <div style="font-size:14px">${esc(f.name)}</div>
         <div style="font-size:11px;color:var(--muted);margin-top:2px">${f.protein}g prot · ${f.carbs}g hidr · ${f.fat}g gord</div>
       </div>
       <div style="display:flex;align-items:center;gap:8px">
@@ -1222,24 +1289,32 @@ function deleteFavorite(id) {
   if (!confirm('Remover este favorito?')) return;
   state[cp].favorites = state[cp].favorites.filter(f => f.id !== id);
   save();
+  // Re-renderizar el panel (cerrar y volver a abrir)
+  document.getElementById('favoritesPanel').style.display = 'none';
   openFavorites();
-  openFavorites(); // re-open to refresh
 }
 
 function copyYesterday() {
-  const yest = new Date();
-  yest.setDate(yest.getDate() - 1);
-  const yestStr = yest.toISOString().split('T')[0];
-  const yestMeals = state[cp].meals.filter(m => m.date === yestStr);
-  if (yestMeals.length === 0) return alert('Não há refeições registadas ontem!');
-  if (!confirm(`Copiar ${yestMeals.length} refeições de ontem para hoje?`)) return;
-  yestMeals.forEach(m => {
-    state[cp].meals.push({ ...m, id: Date.now() + Math.random(), date: today() });
+  // FIX: copia relativo al día seleccionado (no siempre de ayer-real a hoy-real).
+  // Si estás viendo el día X, copia las refeições del día X-1 hacia el día X.
+  const target = selectedDay();
+  const d = new Date();
+  d.setDate(d.getDate() + selectedDayOffset - 1);
+  const prevStr = localDateStr(d);
+  const prevMeals = state[cp].meals.filter(m => m.date === prevStr);
+  if (prevMeals.length === 0) return alert(`Não há refeições registadas em ${formatDate(prevStr)}!`);
+  if (!confirm(`Copiar ${prevMeals.length} refeições de ${formatDate(prevStr)} para ${formatDate(target)}?`)) return;
+  prevMeals.forEach(m => {
+    state[cp].meals.push({ ...m, id: Date.now() + Math.random(), date: target });
   });
   save(); closeModal('foodModal'); renderFood();
 }
 
-function deleteMeal(id) { state[cp].meals = state[cp].meals.filter(m => m.id !== id); save(); renderFood(); }
+function deleteMeal(id) {
+  if (!confirm('Apagar esta refeição?')) return;
+  state[cp].meals = state[cp].meals.filter(m => m.id !== id);
+  save(); renderFood();
+}
 
 function addWeight() {
   const kg = parseFloat(document.getElementById('weightInput').value);
@@ -1264,7 +1339,11 @@ function addWeight() {
   save(); closeModal('weightModal'); renderWeight();
 }
 
-function deleteWeight(id) { state[cp].weights = state[cp].weights.filter(w => w.id !== id); save(); renderWeight(); }
+function deleteWeight(id) {
+  if (!confirm('Apagar este registo de peso?')) return;
+  state[cp].weights = state[cp].weights.filter(w => w.id !== id);
+  save(); renderWeight();
+}
 
 function addTraining() {
   const desc = document.getElementById('trainingDesc').value.trim();
@@ -1353,17 +1432,19 @@ function renderPRs() {
   list.innerHTML = exercises.map(ex => {
     const records = prs[ex];
     const best = records[0];
+    // Escapar el nombre para el atributo onclick (comillas) y para mostrar (HTML)
+    const exAttr = ex.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
     return `
       <div style="background:var(--surface2);border-radius:12px;padding:12px 14px;margin-bottom:8px">
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div>
-            <div style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;color:var(--accent2)">${ex}</div>
+            <div style="font-family:'Bebas Neue';font-size:18px;letter-spacing:1px;color:var(--accent2)">${esc(ex)}</div>
             <div style="font-size:11px;color:var(--muted);margin-top:2px">${formatDate(best.date)}${records.length > 1 ? ' · ' + records.length + ' registos' : ''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
-            <div style="font-family:'Bebas Neue';font-size:24px;color:var(--text)">${best.value}</div>
-            <button onclick="editPR('${ex.replace(/'/g, "\\'")}',${best.id})" class="meal-edit">✏️</button>
-            <button onclick="deletePR('${ex.replace(/'/g, "\\'")}',${best.id})" class="meal-delete">×</button>
+            <div style="font-family:'Bebas Neue';font-size:24px;color:var(--text)">${esc(best.value)}</div>
+            <button onclick="editPR('${exAttr}',${best.id})" class="meal-edit">✏️</button>
+            <button onclick="deletePR('${exAttr}',${best.id})" class="meal-delete">×</button>
           </div>
         </div>
       </div>
@@ -1387,8 +1468,8 @@ function renderCalendar() {
   const firstDay = new Date(year, month, 1).getDay();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const trainedDays = new Set(trainings.filter(t => {
-    const d = new Date(t.date);
-    return d.getMonth() === month && d.getFullYear() === year;
+    const p = t.date.split('-');
+    return parseInt(p[1]) - 1 === month && parseInt(p[0]) === year;
   }).map(t => parseInt(t.date.split('-')[2])));
 
   const accent = cp === 'g' ? '#e8ff47' : '#ff6b9d';
@@ -1413,7 +1494,11 @@ function renderCalendar() {
   document.getElementById('trainingCalendar').innerHTML = html;
 }
 
-function deleteTraining(id) { state[cp].trainings = state[cp].trainings.filter(t => t.id !== id); save(); renderTraining(); }
+function deleteTraining(id) {
+  if (!confirm('Apagar este treino?')) return;
+  state[cp].trainings = state[cp].trainings.filter(t => t.id !== id);
+  save(); renderTraining();
+}
 
 function drawWeeklyChart() {
   if (!cp) return;
@@ -1429,7 +1514,7 @@ function drawWeeklyChart() {
   for (let i = 6; i >= 0; i--) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
-    const dateStr = d.toISOString().split('T')[0];
+    const dateStr = localDateStr(d);
     const meals = state[cp].meals.filter(m => m.date === dateStr);
     const trainings = state[cp].trainings.filter(t => t.date === dateStr);
     const kcal = meals.reduce((s,m) => s + m.kcal, 0);
@@ -1556,7 +1641,7 @@ function renderFood() {
   list.innerHTML = sorted.map(m => `
     <div class="meal-item">
       <div class="meal-info">
-        <div class="mname">${typeEmojis[m.type]} ${m.name}</div>
+        <div class="mname">${typeEmojis[m.type]} ${esc(m.name)}</div>
         <div class="mdetail type-${m.type}">${typeLabels[m.type]}${m.protein ? ' · ' + m.protein + 'g prot' : ''}</div>
       </div>
       <div style="display:flex;align-items:center">
@@ -1690,7 +1775,7 @@ function renderWeight() {
     const prev = weights[i+1];
     let delta = '';
     if (prev) { const diff = (w.kg - prev.kg).toFixed(1); delta = `<span class="delta-badge ${diff <= 0 ? 'delta-down' : 'delta-up'}">${diff <= 0 ? '' : '+'}${diff}kg</span>`; }
-    return `<div class="weight-history-item"><div><div class="wdate">${formatDate(w.date)}${w.note ? ' · ' + w.note : ''}</div></div><div style="display:flex;align-items:center;gap:10px">${delta}<div class="wkg">${w.kg}kg</div><button class="meal-edit" onclick="editWeight(${w.id})">✏️</button><button class="meal-delete" onclick="deleteWeight(${w.id})">×</button></div></div>`;
+    return `<div class="weight-history-item"><div><div class="wdate">${formatDate(w.date)}${w.note ? ' · ' + esc(w.note) : ''}</div></div><div style="display:flex;align-items:center;gap:10px">${delta}<div class="wkg">${w.kg}kg</div><button class="meal-edit" onclick="editWeight(${w.id})">✏️</button><button class="meal-delete" onclick="deleteWeight(${w.id})">×</button></div></div>`;
   }).join('');
   drawWeightChart();
 }
@@ -1717,13 +1802,14 @@ function renderTraining() {
   const now = new Date();
   if (trainingFilter === 'month') {
     trainings = trainings.filter(t => {
-      const d = new Date(t.date);
-      return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      const p = t.date.split('-');
+      return parseInt(p[1]) - 1 === now.getMonth() && parseInt(p[0]) === now.getFullYear();
     });
   } else if (trainingFilter === 'week') {
     const weekAgo = new Date();
     weekAgo.setDate(weekAgo.getDate() - 7);
-    trainings = trainings.filter(t => new Date(t.date) >= weekAgo);
+    const weekAgoStr = localDateStr(weekAgo);
+    trainings = trainings.filter(t => t.date >= weekAgoStr);
   }
 
   renderCalendar();
@@ -1733,16 +1819,16 @@ function renderTraining() {
   list.innerHTML = trainings.map(t => `
     <div class="workout-card">
       <div class="workout-header">
-        <div><div class="workout-type">${t.feeling ? t.feeling + ' ' : ''}${t.type}</div><div class="workout-date">${formatDate(t.date)}</div></div>
+        <div><div class="workout-type">${t.feeling ? t.feeling + ' ' : ''}${esc(t.type)}</div><div class="workout-date">${formatDate(t.date)}</div></div>
         <div style="display:flex;align-items:center;gap:4px">
           <button class="workout-edit" onclick="editTraining(${t.id})">✏️</button>
           <button class="workout-delete" onclick="deleteTraining(${t.id})">×</button>
         </div>
       </div>
-      <div class="workout-desc">${t.desc}</div>
-      ${t.result ? `<div class="workout-result">🎯 ${t.result}</div>` : ''}
+      <div class="workout-desc">${esc(t.desc)}</div>
+      ${t.result ? `<div class="workout-result">🎯 ${esc(t.result)}</div>` : ''}
       ${t.kcal ? `<div class="workout-kcal">🔥 ~${t.kcal} kcal queimadas</div>` : ''}
-      ${t.notes ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);font-style:italic">"${t.notes}"</div>` : ''}
+      ${t.notes ? `<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:12px;color:var(--muted);font-style:italic">"${esc(t.notes)}"</div>` : ''}
     </div>`).join('');
 }
 
@@ -1784,7 +1870,7 @@ function showDailySummary() {
     html += `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">Refeições</div>`;
     sortedMeals.forEach(m => {
       html += `<div style="background:var(--surface2);border-radius:10px;padding:8px 12px;margin-bottom:4px;display:flex;justify-content:space-between;font-size:13px">
-        <span>${typeEmojis[m.type]} ${m.name}</span><span class="${c}" style="font-weight:600">${m.kcal} kcal</span>
+        <span>${typeEmojis[m.type]} ${esc(m.name)}</span><span class="${c}" style="font-weight:600">${m.kcal} kcal</span>
       </div>`;
     });
   }
@@ -1793,7 +1879,7 @@ function showDailySummary() {
     html += `<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.5px;margin:14px 0 6px">Treinos</div>`;
     todayTrainings.forEach(t => {
       html += `<div style="background:var(--surface2);border-radius:10px;padding:8px 12px;margin-bottom:4px;font-size:13px">
-        ${t.feeling ? t.feeling + ' ' : ''}<b>${t.type}</b> — ${t.desc}${t.kcal ? ` <span style="color:var(--accent2)">(${t.kcal} kcal)</span>` : ''}
+        ${t.feeling ? t.feeling + ' ' : ''}<b>${esc(t.type)}</b> — ${esc(t.desc)}${t.kcal ? ` <span style="color:var(--accent2)">(${t.kcal} kcal)</span>` : ''}
       </div>`;
     });
   }
