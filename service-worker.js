@@ -1,9 +1,11 @@
 // Bumpeamos la versión para forzar la activación del nuevo SW y limpiar caché viejo
-const CACHE_NAME = 'gs-tracker-v2';
+const CACHE_NAME = 'gs-tracker-v3';
 
-// Solo cacheamos assets estáticos que casi nunca cambian (iconos, fuentes)
-// El HTML NO se mete aquí — siempre va por network-first
+// Assets estáticos que casi nunca cambian + index.html como fallback offline.
+// (index.html se precachea solo como red de seguridad: en uso normal siempre
+// se sirve por network-first y la copia se refresca en cada navegación)
 const STATIC_ASSETS = [
+  './index.html',
   './manifest.json',
   './icon-192.png',
   './icon-512.png',
@@ -29,13 +31,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // BYPASS TOTAL para llamadas que NUNCA deben cachearse:
+  // BYPASS solo para llamadas de DATOS que nunca deben cachearse:
   // - Supabase (datos del usuario)
-  // - APIs / proxies (IA de macros y kcal)
+  // - El proxy de IA (/api/...)
+  //
+  // FIX: antes había un bypass de hostname 'netlify.app' que excluía TODO
+  // el propio sitio (la app vive en *.netlify.app), desactivando el
+  // network-first del HTML y el modo offline por completo.
   if (
     url.hostname.endsWith('supabase.co') ||
-    url.pathname.includes('/api/') ||
-    url.hostname.includes('netlify.app')
+    url.pathname.startsWith('/api/')
   ) {
     return; // dejamos que el navegador haga la request normal sin tocarla
   }
